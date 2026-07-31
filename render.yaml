@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: log-analyzer-api
+    env: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: CLIENT_URL
+        sync: false
+      - key: PORT
+        value: 5001
