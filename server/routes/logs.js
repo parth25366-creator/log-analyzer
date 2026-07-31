@@ -10,19 +10,31 @@ router.post('/upload', upload.single('logfile'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // read file contents
     const filePath = path.join(__dirname, '../uploads', req.file.filename);
     const content = fs.readFileSync(filePath, 'utf8');
     const lines = content.split('\n').filter(l => l.trim() !== '');
 
-    // TODO: parse lines
-    // TODO: run detections
-    // TODO: return results
+    // parse all lines
+    const entries = lines.map(parseLine).filter(e => e !== null);
+
+    // run all detections
+    const bruteForce = detectBruteForce(entries);
+    const highVolume = detectHighVolume(entries);
+    const scanners = detectScanner(entries);
+    const summary = getSummary(entries);
+
+    // combine all alerts
+    const alerts = [...bruteForce, ...highVolume, ...scanners];
+
+    // cleanup uploaded file
+    fs.unlinkSync(filePath);
 
     res.status(200).json({
-      message: 'File uploaded successfully',
+      filename: req.file.originalname,
       totalLines: lines.length,
-      filename: req.file.originalname
+      parsedEntries: entries.length,
+      summary,
+      alerts
     });
   } catch (err) {
     console.error(err.message);
