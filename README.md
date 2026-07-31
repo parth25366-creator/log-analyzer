@@ -3,8 +3,8 @@
 A cybersecurity tool that analyzes server logs to detect suspicious activity like brute force attacks, path scanners, and high volume IPs.
 
 ## Live Demo
-- 🌐 Frontend: coming soon (Vercel)
-- 🔧 Backend: coming soon (Render)
+- 🌐 Frontend: https://log-analyzer-five.vercel.app
+- 🔧 Backend: https://log-analyzer-4wug.onrender.com
 
 ## Tech Stack
 - **Frontend:** React, React Router, Axios
@@ -66,4 +66,4 @@ npm start        # runs on localhost:3000
 Use the included `sample.log` file to test — it contains simulated brute force and scanner activity.
 
 ## Status
-✅ Core features complete — deployment coming soon
+✅ Fully deployed and live!
