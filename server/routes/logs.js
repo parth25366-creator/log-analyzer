@@ -3,7 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const upload = require('../utils/upload');
-const { parseLine, detectBruteForce, detectHighVolume, detectScanner, getSummary } = require('../utils/parser');
+const { parseLine, detectBruteForce, detectHighVolume, detectScanner, detectRepeatedErrors, getSummary } = require('../utils/parser');
 
 // POST /api/logs/upload
 router.post('/upload', upload.single('logfile'), (req, res) => {
@@ -21,10 +21,11 @@ router.post('/upload', upload.single('logfile'), (req, res) => {
     const bruteForce = detectBruteForce(entries);
     const highVolume = detectHighVolume(entries);
     const scanners = detectScanner(entries);
+    const repeatedErrors = detectRepeatedErrors(entries);
     const summary = getSummary(entries);
 
     // combine all alerts
-    const alerts = [...bruteForce, ...highVolume, ...scanners];
+    const alerts = [...bruteForce, ...highVolume, ...scanners, ...repeatedErrors];
 
     // cleanup uploaded file
     fs.unlinkSync(filePath);

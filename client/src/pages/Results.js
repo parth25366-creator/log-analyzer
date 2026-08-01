@@ -31,7 +31,7 @@ function Results() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
           <div>
             <h1 style={{ color: '#f1f5f9', fontSize: '1.5rem' }}>📋 Analysis Results</h1>
-            <p style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>{filename} · {totalLines} lines · {parsedEntries} parsed</p>
+            <p style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>{filename} · {totalLines} lines · {parsedEntries} parsed · {summary.logType}</p>
           </div>
           <button onClick={() => navigate('/')} style={backBtn}>← Analyze Another</button>
         </div>
