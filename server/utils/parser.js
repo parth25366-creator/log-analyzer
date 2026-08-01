@@ -23,6 +23,9 @@ const detectFormat = (lines) => {
   if (/^\{.*".*":.*\}/.test(sample))
     return 'json';
 
+  if (/nova-api|nova\.|neutron\.|keystone\.|glance\./.test(sample))
+    return 'openstack';
+
   return 'unknown';
 };
 
@@ -81,6 +84,22 @@ const parseSSHAuth = (line) => {
   };
 };
 
+const parseOpenStack = (line) => {
+  // format: filename 2017-05-16 00:00:00.000 PID LEVEL module [req-id ...] IP "METHOD /path HTTP/1.1" status: 200 len: 1234 time: 0.123
+  const regex = /\S+\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+\d+\s+(\w+)\s+\S+\s+\[.*?\]\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+"(\w+)\s+(\S+)\s+\S+"\s+status:\s+(\d+)/;
+  const match = line.match(regex);
+  if (!match) return null;
+  return {
+    type: 'access',
+    date: match[1],
+    level: match[2],
+    ip: match[3],
+    method: match[4],
+    path: match[5],
+    status: parseInt(match[6])
+  };
+};
+
 const parseJSON = (line) => {
   try {
     const obj = JSON.parse(line);
@@ -106,6 +125,7 @@ const parseLine = (line, format) => {
     case 'nginx_access':  return parseNginxAccess(line);
     case 'nginx_error':   return parseNginxError(line);
     case 'ssh_auth':      return parseSSHAuth(line);
+    case 'openstack':     return parseOpenStack(line);
     case 'json':          return parseJSON(line);
     default:
       return parseApacheAccess(line) || parseApacheError(line) ||
@@ -165,6 +185,7 @@ const formatLabels = {
   nginx_access:  'Nginx Access Log',
   nginx_error:   'Nginx Error Log',
   ssh_auth:      'SSH Auth Log',
+  openstack:     'OpenStack Log',
   json:          'JSON Log',
   unknown:       'Unknown Format'
 };
