@@ -1,132 +1,189 @@
-// Log Parser — supports Apache access logs and Apache error logs
+// Log Parser — auto-detects format and parses accordingly
 
-// parse Apache access log line
-// format: IP - - [date] "METHOD /path HTTP/1.1" status bytes
-const parseAccessLine = (line) => {
+// ─── FORMAT DETECTION ───────────────────────────────────────────────────────
+
+const detectFormat = (lines) => {
+  const sample = lines.slice(0, 5).join('\n');
+
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}.*\[.*\].*"(GET|POST|PUT|DELETE|HEAD)/.test(sample))
+    return 'apache_access';
+
+  if (/^\[.*\] \[(error|warn|notice|info)\]/.test(sample))
+    return 'apache_error';
+
+  if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} \[(error|warn|notice|info)\]/.test(sample))
+    return 'nginx_error';
+
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3} - - \[/.test(sample))
+    return 'nginx_access';
+
+  if (/^[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}:\d{2}.*sshd.*/.test(sample))
+    return 'ssh_auth';
+
+  if (/^\{.*".*":.*\}/.test(sample))
+    return 'json';
+
+  return 'unknown';
+};
+
+// ─── PARSERS ────────────────────────────────────────────────────────────────
+
+const parseApacheAccess = (line) => {
   const regex = /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) \S+" (\d+) (\S+)/;
   const match = line.match(regex);
   if (!match) return null;
   return {
-    type: 'access',
-    ip: match[1],
-    date: match[2],
-    method: match[3],
-    path: match[4],
-    status: parseInt(match[5]),
-    bytes: match[6]
+    type: 'access', ip: match[1], date: match[2],
+    method: match[3], path: match[4],
+    status: parseInt(match[5]), bytes: match[6]
   };
 };
 
-// parse Apache error log line
-// format: [date] [level] message (optional: client IP)
-const parseErrorLine = (line) => {
+const parseApacheError = (line) => {
   const regex = /^\[([^\]]+)\] \[(\w+)\] (.+)/;
   const match = line.match(regex);
   if (!match) return null;
-
-  const message = match[3];
-  const level = match[2];
-
-  // try to extract IP from message if present
-  const ipMatch = message.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
-  const ip = ipMatch ? ipMatch[1] : null;
-
+  const ipMatch = match[3].match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
   return {
-    type: 'error',
-    date: match[1],
-    level,
-    message,
-    ip,
-    // map error levels to pseudo status codes for detection
-    status: level === 'error' ? 500 : level === 'warn' ? 400 : 200
+    type: 'error', date: match[1], level: match[2],
+    message: match[3], ip: ipMatch ? ipMatch[1] : null,
+    status: match[2] === 'error' ? 500 : match[2] === 'warn' ? 400 : 200
   };
 };
 
-// auto detect and parse any line
-const parseLine = (line) => {
-  // try access log format first
-  const access = parseAccessLine(line);
-  if (access) return access;
-  // try error log format
-  const error = parseErrorLine(line);
-  if (error) return error;
-  return null;
+const parseNginxError = (line) => {
+  const regex = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}) \[(\w+)\] \d+#\d+: (.+)/;
+  const match = line.match(regex);
+  if (!match) return null;
+  const ipMatch = match[3].match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+  return {
+    type: 'error', date: match[1], level: match[2],
+    message: match[3], ip: ipMatch ? ipMatch[1] : null,
+    status: match[2] === 'error' ? 500 : 200
+  };
 };
 
-// brute force — IP with many 401/403 responses (access logs)
+const parseNginxAccess = (line) => parseApacheAccess(line);
+
+const parseSSHAuth = (line) => {
+  const regex = /^(\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+\S+\s+sshd\[[\d]+\]:\s+(.+)/;
+  const match = line.match(regex);
+  if (!match) return null;
+  const msg = match[2];
+  const ipMatch = msg.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+  const failed = /failed password|invalid user|connection closed|disconnect/i.test(msg);
+  const accepted = /accepted password|accepted publickey/i.test(msg);
+  return {
+    type: 'ssh', date: match[1], message: msg,
+    ip: ipMatch ? ipMatch[1] : null,
+    status: failed ? 401 : accepted ? 200 : 200,
+    failed, accepted
+  };
+};
+
+const parseJSON = (line) => {
+  try {
+    const obj = JSON.parse(line);
+    return {
+      type: 'json',
+      ip: obj.ip || obj.client_ip || obj.remote_addr || null,
+      status: obj.status || obj.status_code || 200,
+      method: obj.method || obj.http_method || null,
+      path: obj.path || obj.url || obj.uri || null,
+      date: obj.time || obj.timestamp || obj.date || null,
+      message: obj.message || obj.msg || null,
+      level: obj.level || obj.severity || null
+    };
+  } catch { return null; }
+};
+
+// ─── MAIN PARSE FUNCTION ────────────────────────────────────────────────────
+
+const parseLine = (line, format) => {
+  switch (format) {
+    case 'apache_access': return parseApacheAccess(line);
+    case 'apache_error':  return parseApacheError(line);
+    case 'nginx_access':  return parseNginxAccess(line);
+    case 'nginx_error':   return parseNginxError(line);
+    case 'ssh_auth':      return parseSSHAuth(line);
+    case 'json':          return parseJSON(line);
+    default:
+      return parseApacheAccess(line) || parseApacheError(line) ||
+             parseNginxError(line) || parseSSHAuth(line) || parseJSON(line);
+  }
+};
+
+// ─── DETECTIONS ─────────────────────────────────────────────────────────────
+
 const detectBruteForce = (entries, threshold = 10) => {
   const failMap = {};
   entries.forEach(e => {
-    if (e.ip && (e.status === 401 || e.status === 403)) {
+    if (e.ip && (e.status === 401 || e.status === 403 || e.failed)) {
       failMap[e.ip] = (failMap[e.ip] || 0) + 1;
     }
   });
   return Object.entries(failMap)
-    .filter(([, count]) => count >= threshold)
+    .filter(([, c]) => c >= threshold)
     .map(([ip, count]) => ({ ip, count, type: 'Brute Force' }));
 };
 
-// high volume — IP sending too many requests
 const detectHighVolume = (entries, threshold = 100) => {
   const ipMap = {};
-  entries.forEach(e => {
-    if (e.ip) ipMap[e.ip] = (ipMap[e.ip] || 0) + 1;
-  });
+  entries.forEach(e => { if (e.ip) ipMap[e.ip] = (ipMap[e.ip] || 0) + 1; });
   return Object.entries(ipMap)
-    .filter(([, count]) => count >= threshold)
+    .filter(([, c]) => c >= threshold)
     .map(([ip, count]) => ({ ip, count, type: 'High Volume' }));
 };
 
-// scanner — IP hitting many 404s (path enumeration)
 const detectScanner = (entries, threshold = 20) => {
   const scanMap = {};
   entries.forEach(e => {
-    if (e.ip && e.status === 404) {
-      scanMap[e.ip] = (scanMap[e.ip] || 0) + 1;
-    }
+    if (e.ip && e.status === 404) scanMap[e.ip] = (scanMap[e.ip] || 0) + 1;
   });
   return Object.entries(scanMap)
-    .filter(([, count]) => count >= threshold)
+    .filter(([, c]) => c >= threshold)
     .map(([ip, count]) => ({ ip, count, type: 'Scanner / Path Enumeration' }));
 };
 
-// repeated errors — for error logs, detect IPs with many errors
 const detectRepeatedErrors = (entries, threshold = 10) => {
   const errorMap = {};
   entries.forEach(e => {
-    if (e.type === 'error' && e.level === 'error' && e.ip) {
+    if (e.ip && (e.level === 'error' || e.status >= 500)) {
       errorMap[e.ip] = (errorMap[e.ip] || 0) + 1;
     }
   });
   return Object.entries(errorMap)
-    .filter(([, count]) => count >= threshold)
+    .filter(([, c]) => c >= threshold)
     .map(([ip, count]) => ({ ip, count, type: 'Repeated Errors' }));
 };
 
-// error level breakdown for error logs
-const getErrorBreakdown = (entries) => {
-  const levels = {};
-  entries.forEach(e => {
-    if (e.type === 'error') {
-      levels[e.level] = (levels[e.level] || 0) + 1;
-    }
-  });
-  return levels;
+// ─── SUMMARY ────────────────────────────────────────────────────────────────
+
+const formatLabels = {
+  apache_access: 'Apache Access Log',
+  apache_error:  'Apache Error Log',
+  nginx_access:  'Nginx Access Log',
+  nginx_error:   'Nginx Error Log',
+  ssh_auth:      'SSH Auth Log',
+  json:          'JSON Log',
+  unknown:       'Unknown Format'
 };
 
-// summary stats
-const getSummary = (entries) => {
+const getSummary = (entries, format) => {
   const withIP = entries.filter(e => e.ip);
   return {
     totalRequests: entries.length,
     uniqueIPs: new Set(withIP.map(e => e.ip)).size,
-    totalErrors: entries.filter(e => e.status >= 400 || e.level === 'error').length,
-    logType: entries[0]?.type === 'error' ? 'Apache Error Log' : 'Apache Access Log',
-    errorBreakdown: getErrorBreakdown(entries),
+    totalErrors: entries.filter(e => e.status >= 400 || e.level === 'error' || e.failed).length,
+    logType: formatLabels[format] || 'Unknown Format',
     top5IPs: Object.entries(
       withIP.reduce((acc, e) => { acc[e.ip] = (acc[e.ip] || 0) + 1; return acc; }, {})
     ).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([ip, count]) => ({ ip, count }))
   };
 };
 
-module.exports = { parseLine, detectBruteForce, detectHighVolume, detectScanner, detectRepeatedErrors, getSummary };
+module.exports = {
+  detectFormat, parseLine,
+  detectBruteForce, detectHighVolume, detectScanner, detectRepeatedErrors,
+  getSummary
+};
