@@ -5,7 +5,7 @@ const path = require('path');
 const upload = require('../utils/upload');
 const {
   detectFormat, parseLine,
-  detectBruteForce, detectHighVolume, detectScanner, detectRepeatedErrors,
+  detectBruteForce, detectHighVolume, detectScanner, detectRepeatedErrors, detectSystemAnomalies,
   getSummary
 } = require('../utils/parser');
 
@@ -29,7 +29,8 @@ router.post('/upload', upload.single('logfile'), (req, res) => {
       ...detectBruteForce(entries),
       ...detectHighVolume(entries),
       ...detectScanner(entries),
-      ...detectRepeatedErrors(entries)
+      ...detectRepeatedErrors(entries),
+      ...detectSystemAnomalies(entries)
     ];
 
     const summary = getSummary(entries, format);
